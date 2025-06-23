@@ -15,12 +15,18 @@ HAVE_FPING=false
 HAVE_MASSCAN=false
 HAVE_HPING3=false
 
-# Stealth configuration variables
+# Enhanced stealth configuration variables
 STEALTH_MODE=false
 RANDOMIZE_ORDER=true
 DECOY_COUNT=3
 MIN_DELAY=0.1
 MAX_DELAY=0.5
+
+# Nmap optimization variables
+NMAP_PARALLEL_MIN=10
+NMAP_PARALLEL_MAX=50
+NMAP_HOST_TIMEOUT="3s"
+NMAP_DISCOVERY_PROBES=4
 
 # Function to generate random MAC address for spoofing
 generate_random_mac() {
@@ -35,16 +41,38 @@ get_random_delay() {
     echo "scale=2; $min_delay + ($max_delay - $min_delay) * $RANDOM / 32767" | bc -l 2>/dev/null || echo "$min_delay"
 }
 
-# Function to create decoy IP list for nmap
-generate_decoys() {
+# Enhanced function to create intelligent decoy IP list
+generate_smart_decoys() {
     local network_base="$1"
+    local target_range_start="$2"
+    local target_range_end="$3"
     local decoy_list=""
     
+    # Create decoys that blend with the network topology
     for i in $(seq 1 $DECOY_COUNT); do
-        # Generate random IP in same subnet but avoid common ranges
-        local random_host=$((RANDOM % 254 + 1))
-        # Skip common gateway/broadcast ranges
-        while [[ $random_host -eq 1 || $random_host -eq 254 || $random_host -eq 255 ]]; do
+        local random_host
+        
+        # 70% chance to use nearby IPs (more realistic)
+        if (( RANDOM % 10 < 7 )); then
+            # Generate IP close to target range but outside it
+            local range_size=$((target_range_end - target_range_start))
+            local offset=$((RANDOM % (range_size * 2) + 1))
+            
+            if (( target_range_start - offset > 1 )); then
+                random_host=$((target_range_start - offset))
+            elif (( target_range_end + offset < 254 )); then
+                random_host=$((target_range_end + offset))
+            else
+                random_host=$((RANDOM % 254 + 1))
+            fi
+        else
+            # 30% chance for completely random (noise)
+            random_host=$((RANDOM % 254 + 1))
+        fi
+        
+        # Avoid common gateway/broadcast/multicast ranges
+        while [[ $random_host -eq 1 || $random_host -eq 254 || $random_host -eq 255 || 
+                 ($random_host -ge 224 && $random_host -le 239) ]]; do
             random_host=$((RANDOM % 254 + 1))
         done
         
@@ -58,176 +86,218 @@ generate_decoys() {
     echo "$decoy_list"
 }
 
-# Function to randomize IP order for scanning
-randomize_ip_list() {
+# Advanced nmap host discovery with intelligent filtering
+optimized_nmap_discovery() {
     local network_base="$1"
-    local ip_list=()
+    local scan_type="$2"  # "stealth" or "fast"
     
-    # Create array of IPs
-    for i in {1..254}; do
-        ip_list+=("${network_base}.${i}")
-    done
+    echo -e "${BLUE}🎯 Using advanced nmap host discovery with intelligent filtering...${NC}"
     
-    # Shuffle the array using sort with random keys
-    printf '%s\n' "${ip_list[@]}" | shuf
-}
-
-# Enhanced stealth ping with timing randomization
-stealth_ping() {
-    local network_base="$1"
-    echo -e "${PURPLE}🥷 STEALTH MODE: Using randomized timing and fragmented packets...${NC}"
-    echo -e "${CYAN}Techniques: Random delays, packet fragmentation, TTL variation${NC}"
+    local nmap_args=""
+    local timing_template=""
+    local discovery_method=""
     
-    # Create randomized IP list
-    local randomized_ips
-    if $RANDOMIZE_ORDER; then
-        readarray -t randomized_ips < <(randomize_ip_list "$network_base")
+    # Configure nmap based on scan type
+    if [[ "$scan_type" == "stealth" ]]; then
+        echo -e "${PURPLE}🥷 STEALTH MODE: Advanced evasion techniques enabled${NC}"
+        
+        # Generate smart decoys for the entire range
+        local decoys=$(generate_smart_decoys "$network_base" 1 254)
+        echo -e "${CYAN}Using intelligent decoy IPs: $decoys${NC}"
+        
+        timing_template="T1"
+        discovery_method="-PE -PP -PM -PO"  # Multiple ICMP types for better coverage
+        
+        nmap_args="--randomize-hosts \
+                   --data-length $((RANDOM % 32 + 16)) \
+                   --ttl $((32 + RANDOM % 32)) \
+                   -D $decoys \
+                   --scan-delay $(get_random_delay 0.5 2.0) \
+                   --max-parallelism $NMAP_PARALLEL_MIN \
+                   --min-parallelism 5 \
+                   -f \
+                   --spoof-mac $(generate_random_mac) \
+                   --host-timeout $NMAP_HOST_TIMEOUT"
     else
-        randomized_ips=()
-        for i in {1..254}; do
-            randomized_ips+=("${network_base}.${i}")
-        done
+        echo -e "${GREEN}⚡ FAST MODE: Optimized for speed and efficiency${NC}"
+        
+        timing_template="T4"
+        discovery_method="-PE -PA80,443,22,21,25,53,135,139,445"  # TCP ACK to common ports
+        
+        nmap_args="--min-parallelism $NMAP_PARALLEL_MIN \
+                   --max-parallelism $NMAP_PARALLEL_MAX \
+                   --host-timeout $NMAP_HOST_TIMEOUT \
+                   --max-retries 2"
     fi
     
     start_time=$(date +%s)
-    local found_hosts=0
     
-    for ip in "${randomized_ips[@]}"; do
-        # Random delay between probes
-        local delay=$(get_random_delay $MIN_DELAY $MAX_DELAY)
-        sleep "$delay"
-        
-        # Use fragmented packets and random TTL to avoid detection
-        local ttl=$((32 + RANDOM % 32))  # Random TTL between 32-64
-        
-        # Fragment the packet and use random packet size
-        local packet_size=$((56 + RANDOM % 20))  # Random size 56-76 bytes
-        
-        if ping -c 1 -W 2 -t "$ttl" -s "$packet_size" -q "$ip" > /dev/null 2>&1; then
-            echo -e "${GREEN}🎯 $ip is alive (TTL: $ttl, Size: $packet_size bytes)${NC}"
-            ((found_hosts++))
-        fi
-        
-        # Add occasional longer pauses to break patterns
-        if (( RANDOM % 20 == 0 )); then
-            sleep $(get_random_delay 1.0 3.0)
-        fi
-    done
+    # Execute nmap with intelligent output parsing
+    echo -e "${CYAN}Discovery method: $discovery_method${NC}"
+    echo -e "${CYAN}Timing template: $timing_template${NC}"
+    echo ""
     
-    end_time=$(date +%s)
-    echo -e "${BLUE}Stealth scan completed in $((end_time - start_time)) seconds${NC}"
-    echo -e "${GREEN}Found $found_hosts active hosts${NC}"
-}
-
-# Ultra-stealth nmap with advanced evasion
-stealth_nmap() {
-    local network_base="$1"
-    echo -e "${PURPLE}🥷 STEALTH NMAP: Using decoys, timing evasion, and fragmentation...${NC}"
+    # Use nmap's XML output for better parsing reliability
+    local temp_xml=$(mktemp)
+    local temp_results=$(mktemp)
     
-    # Generate decoy IPs
-    local decoys=$(generate_decoys "$network_base")
-    echo -e "${CYAN}Using decoy IPs: $decoys${NC}"
-    
-    start_time=$(date +%s)
-    
-    # Ultra-stealth nmap command with multiple evasion techniques
+    # Execute the nmap scan with comprehensive host discovery
     nmap -sn \
-         -T1 \
-         --randomize-hosts \
-         --data-length $((RANDOM % 32 + 16)) \
-         --ttl $((32 + RANDOM % 32)) \
-         -D "$decoys" \
-         --scan-delay $(get_random_delay 0.5 2.0) \
-         --max-parallelism 5 \
-         --min-parallelism 1 \
-         -f \
-         --spoof-mac "$(generate_random_mac)" \
-         "${network_base}.1-254" 2>/dev/null | \
-    grep -E "Nmap scan report for" | \
-    awk -v green="$GREEN" -v nc="$NC" '{print green "🎯 " $5 " is alive (stealth mode)" nc}'
+         -$timing_template \
+         $discovery_method \
+         $nmap_args \
+         -oX "$temp_xml" \
+         "${network_base}.1-254" 2>/dev/null
     
-    end_time=$(date +%s)
-    echo -e "${BLUE}Stealth nmap completed in $((end_time - start_time)) seconds${NC}"
-}
-
-# Stealth fping with controlled timing
-stealth_fping() {
-    local network_base="$1"
-    echo -e "${PURPLE}🥷 STEALTH FPING: Using controlled intervals and randomization...${NC}"
-    
-    start_time=$(date +%s)
-    
-    # Create randomized target list
-    local temp_file=$(mktemp)
-    randomize_ip_list "$network_base" > "$temp_file"
-    
-    echo -e "${GREEN}Active hosts found:${NC}"
-    
-    # Use fping with stealth settings
-    fping -f "$temp_file" \
-          -r 2 \
-          -t 2000 \
-          -i $(echo "scale=0; $(get_random_delay 100 500)" | bc -l) \
-          -p $(echo "scale=0; $(get_random_delay 500 1500)" | bc -l) \
-          -a -q 2>/dev/null | \
-    while read host; do
-        echo -e "${GREEN}🎯 $host is alive (stealth)${NC}"
-        # Small delay between outputs to avoid burst patterns
-        sleep $(get_random_delay 0.1 0.3)
-    done
-    
-    rm -f "$temp_file"
-    
-    end_time=$(date +%s)
-    echo -e "${BLUE}Stealth fping completed in $((end_time - start_time)) seconds${NC}"
-}
-
-# Advanced stealth masscan with rate limiting
-stealth_masscan() {
-    local network_base="$1"
-    echo -e "${PURPLE}🥷 STEALTH MASSCAN: Using ultra-low rates and randomization...${NC}"
-    echo -e "${CYAN}Techniques: Low packet rate, source port randomization, IP randomization${NC}"
-    
-    start_time=$(date +%s)
-    
-    # Generate random source port
-    local src_port=$((1024 + RANDOM % 64512))
-    
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${YELLOW}masscan requires root privileges. Running with sudo...${NC}"
-        sudo masscan "${network_base}.0/24" \
-               --ping \
-               --rate 50 \
-               --wait 5 \
-               --randomize-hosts \
-               --source-port "$src_port" \
-               --router-mac "$(generate_random_mac)" \
-               2>/dev/null | \
-        grep -oE "${network_base}\.[0-9]+" | \
-        sort -V | uniq | \
-        while read host; do
-            echo -e "${GREEN}🎯 $host is alive (stealth masscan)${NC}"
-            sleep $(get_random_delay 0.2 0.5)
-        done
+    # Parse XML output for more reliable results
+    if command -v xmllint &> /dev/null; then
+        # Use xmllint for precise XML parsing
+        xmllint --xpath "//host[status/@state='up']/address[@addrtype='ipv4']/@addr" "$temp_xml" 2>/dev/null | \
+        grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+        sort -V > "$temp_results"
     else
-        masscan "${network_base}.0/24" \
-               --ping \
-               --rate 50 \
-               --wait 5 \
-               --randomize-hosts \
-               --source-port "$src_port" \
-               --router-mac "$(generate_random_mac)" \
-               2>/dev/null | \
-        grep -oE "${network_base}\.[0-9]+" | \
-        sort -V | uniq | \
-        while read host; do
-            echo -e "${GREEN}🎯 $host is alive (stealth masscan)${NC}"
-            sleep $(get_random_delay 0.2 0.5)
-        done
+        # Fallback to grep/awk parsing with improved accuracy
+        grep -E "<address addr=\"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\" addrtype=\"ipv4\"/>" "$temp_xml" | \
+        grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | \
+        sort -V > "$temp_results"
     fi
     
+    # Enhanced result processing with host information
+    local host_count=0
+    echo -e "${GREEN}📋 Active hosts discovered:${NC}"
+    echo "----------------------------------------"
+    
+    while IFS= read -r ip_addr; do
+        ((host_count++))
+        
+        # Get hostname if available from nmap results
+        local hostname=""
+        if grep -q "hostname.*name=\".*\".*type=\"PTR\"" "$temp_xml"; then
+            hostname=$(grep -A5 -B5 "$ip_addr" "$temp_xml" | \
+                      grep -oE "hostname.*name=\"[^\"]*\"" | \
+                      head -1 | \
+                      sed 's/.*name="\([^"]*\)".*/\1/')
+        fi
+        
+        # Display results with enhanced formatting
+        if [[ -n "$hostname" && "$hostname" != "$ip_addr" ]]; then
+            echo -e "${GREEN}🎯 $ip_addr${NC} ${CYAN}($hostname)${NC}"
+        else
+            echo -e "${GREEN}🎯 $ip_addr${NC}"
+        fi
+        
+        # Add small delay in stealth mode to avoid burst patterns
+        if [[ "$scan_type" == "stealth" ]]; then
+            sleep $(get_random_delay 0.1 0.3)
+        fi
+        
+    done < "$temp_results"
+    
+    # Cleanup temporary files
+    rm -f "$temp_xml" "$temp_results"
+    
     end_time=$(date +%s)
-    echo -e "${BLUE}Stealth masscan completed in $((end_time - start_time)) seconds${NC}"
+    scan_duration=$((end_time - start_time))
+    
+    echo "----------------------------------------"
+    echo -e "${BLUE}📊 Scan Summary:${NC}"
+    echo -e "${GREEN}• Active hosts found: $host_count${NC}"
+    echo -e "${GREEN}• Scan duration: ${scan_duration}s${NC}"
+    echo -e "${GREEN}• Average time per host: $(echo "scale=2; $scan_duration / 254" | bc -l)s${NC}"
+    
+    if [[ "$scan_type" == "stealth" ]]; then
+        echo -e "${PURPLE}• Stealth techniques: Decoys, timing randomization, packet fragmentation${NC}"
+    else
+        echo -e "${CYAN}• Optimization: Parallel processing, smart timeouts, multi-probe discovery${NC}"
+    fi
+}
+
+# Ultra-stealth nmap with advanced evasion - IMPROVED VERSION
+ultra_stealth_nmap() {
+    local network_base="$1"
+    optimized_nmap_discovery "$network_base" "stealth"
+}
+
+# Fast optimized nmap - IMPROVED VERSION
+fast_nmap_discovery() {
+    local network_base="$1"
+    optimized_nmap_discovery "$network_base" "fast"
+}
+
+# Advanced nmap port discovery for found hosts
+nmap_port_discovery() {
+    local network_base="$1"
+    local scan_type="$2"
+    
+    echo -e "${BLUE}🔍 Performing port discovery on active hosts...${NC}"
+    
+    # First, get list of active hosts
+    local temp_hosts=$(mktemp)
+    local temp_xml=$(mktemp)
+    
+    # Quick host discovery first
+    nmap -sn -T4 "${network_base}.1-254" -oX "$temp_xml" 2>/dev/null
+    
+    if command -v xmllint &> /dev/null; then
+        xmllint --xpath "//host[status/@state='up']/address[@addrtype='ipv4']/@addr" "$temp_xml" 2>/dev/null | \
+        grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" > "$temp_hosts"
+    else
+        grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" "$temp_xml" > "$temp_hosts"
+    fi
+    
+    local host_count=$(wc -l < "$temp_hosts")
+    
+    if [[ $host_count -eq 0 ]]; then
+        echo -e "${YELLOW}No active hosts found for port scanning${NC}"
+        rm -f "$temp_hosts" "$temp_xml"
+        return
+    fi
+    
+    echo -e "${GREEN}Found $host_count active hosts. Starting port discovery...${NC}"
+    echo ""
+    
+    # Configure port scan based on type
+    local port_args=""
+    local ports="22,23,25,53,80,110,135,139,443,445,993,995,1723,3389,5900"
+    
+    if [[ "$scan_type" == "stealth" ]]; then
+        echo -e "${PURPLE}🥷 Stealth port discovery with SYN stealth scan${NC}"
+        port_args="-sS -T2 --randomize-hosts -f"
+    else
+        echo -e "${GREEN}⚡ Fast port discovery with connect scan${NC}"
+        port_args="-sT -T4 --min-parallelism 20 --max-parallelism 100"
+    fi
+    
+    # Scan each host for common ports
+    while IFS= read -r host; do
+        echo -e "${CYAN}Scanning $host for common services...${NC}"
+        
+        local port_results=$(mktemp)
+        nmap $port_args -p "$ports" --open "$host" -oG "$port_results" 2>/dev/null
+        
+        # Parse and display open ports
+        local open_ports=$(grep "Ports:" "$port_results" | \
+                          grep -oE "[0-9]+/open" | \
+                          cut -d'/' -f1 | \
+                          tr '\n' ',' | \
+                          sed 's/,$//')
+        
+        if [[ -n "$open_ports" ]]; then
+            echo -e "${GREEN}  └─ Open ports: $open_ports${NC}"
+        else
+            echo -e "${YELLOW}  └─ No common ports open${NC}"
+        fi
+        
+        rm -f "$port_results"
+        
+        # Small delay between hosts in stealth mode
+        if [[ "$scan_type" == "stealth" ]]; then
+            sleep $(get_random_delay 1.0 2.0)
+        fi
+        
+    done < "$temp_hosts"
+    
+    rm -f "$temp_hosts" "$temp_xml"
 }
 
 # Function to detect dependencies including stealth tools
@@ -254,8 +324,8 @@ check_and_install_deps() {
         echo -e "${YELLOW}Warning: Unknown package manager. Manual installation may be required.${NC}"
     fi
     
-    # Check core tools
-    local tools=("nmap:nmap" "fping:fping" "masscan:masscan" "hping3:hping3" "bc:bc" "shuf:coreutils")
+    # Check core tools with improved detection
+    local tools=("nmap:nmap" "fping:fping" "masscan:masscan" "hping3:hping3" "bc:bc" "shuf:coreutils" "xmllint:libxml2-utils")
     
     for tool_info in "${tools[@]}"; do
         IFS=':' read -r tool package <<< "$tool_info"
@@ -342,182 +412,44 @@ install_package() {
     esac
 }
 
-# Enhanced menu with stealth options
-show_stealth_menu() {
-    echo -e "${PURPLE}=== 🥷 STEALTH Network Sweeper - Maximum Evasion ===${NC}"
-    echo -e "${CYAN}Stealth Features: Randomized timing, packet fragmentation, decoy IPs${NC}"
+# Enhanced menu with improved nmap options
+show_enhanced_menu() {
+    echo -e "${PURPLE}=== 🥷 Enhanced Network Stealth Sweeper - Nmap Optimized ===${NC}"
+    echo -e "${CYAN}Features: Intelligent filtering, XML parsing, advanced discovery${NC}"
     echo ""
-    echo "1. Stealth ping sweep (randomized timing + fragmentation)"
-    echo "2. Original optimized ping (fast but detectable)"
-    echo "3. Original batch parallel (medium speed)"
-    
-    local option_counter=4
-    
-    if $HAVE_NMAP; then
-        echo "$option_counter. 🥷 Ultra-stealth nmap (decoys + evasion) ${GREEN}[Available]${NC}"
-        STEALTH_NMAP_OPTION=$option_counter
-        ((option_counter++))
-        echo "$option_counter. Original nmap scan (fast but detectable) ${GREEN}[Available]${NC}"
-        NMAP_OPTION=$option_counter
-        ((option_counter++))
-    else
-        echo "X. Ultra-stealth nmap scan ${RED}[Not Available]${NC}"
-        echo "X. Original nmap scan ${RED}[Not Available]${NC}"
-    fi
-    
-    if $HAVE_FPING; then
-        echo "$option_counter. 🥷 Stealth fping (controlled timing) ${GREEN}[Available]${NC}"
-        STEALTH_FPING_OPTION=$option_counter
-        ((option_counter++))
-        echo "$option_counter. Original fping (lightning fast) ${GREEN}[Available]${NC}"
-        FPING_OPTION=$option_counter
-        ((option_counter++))
-    else
-        echo "X. Stealth fping ${RED}[Not Available]${NC}"
-        echo "X. Original fping ${RED}[Not Available]${NC}"
-    fi
-    
-    if $HAVE_MASSCAN; then
-        echo "$option_counter. 🥷 Stealth masscan (ultra-low rate) ${GREEN}[Available]${NC}"
-        STEALTH_MASSCAN_OPTION=$option_counter
-        ((option_counter++))
-        echo "$option_counter. Original masscan (extreme speed) ${GREEN}[Available]${NC}"
-        MASSCAN_OPTION=$option_counter
-        ((option_counter++))
-    else
-        echo "X. Stealth masscan ${RED}[Not Available]${NC}"
-        echo "X. Original masscan ${RED}[Not Available]${NC}"
-    fi
-    
+    echo "Host Discovery Methods:"
+    echo "1. 🥷 Ultra-stealth nmap (decoys + advanced evasion)"
+    echo "2. ⚡ Fast optimized nmap (intelligent discovery)"
+    echo "3. 🔍 Stealth + Port discovery (comprehensive)"
+    echo "4. 🔍 Fast + Port discovery (quick comprehensive)"
     echo ""
-    echo -e "${YELLOW}Stealth Configuration:${NC}"
-    echo "• Randomize scan order: $RANDOMIZE_ORDER"
-    echo "• Decoy count: $DECOY_COUNT"
-    echo "• Delay range: ${MIN_DELAY}s - ${MAX_DELAY}s"
+    echo -e "${YELLOW}Nmap Configuration:${NC}"
+    echo "• Parallel hosts: $NMAP_PARALLEL_MIN-$NMAP_PARALLEL_MAX"
+    echo "• Host timeout: $NMAP_HOST_TIMEOUT"
+    echo "• Discovery probes: Multiple ICMP + TCP ACK"
+    echo "• XML parsing: $(command -v xmllint &> /dev/null && echo "Enhanced" || echo "Basic")"
     echo ""
-    read -p "Select method (1-$((option_counter-1))): " method
-}
-
-# [Previous scanning functions remain the same - optimized_ping, batch_parallel, nmap_scan, fping_scan, masscan_scan]
-
-# Original functions for comparison
-optimized_ping() {
-    local network_base="$1"
-    echo -e "${BLUE}Using optimized ping with aggressive timeouts...${NC}"
-    
-    fast_ping() {
-        local ip=$1
-        if ping -c 1 -W 1 -q "$ip" > /dev/null 2>&1; then
-            echo -e "${GREEN}$ip is alive${NC}"
-        fi
-    }
-    
-    start_time=$(date +%s)
-    for i in {1..254}; do
-        fast_ping "${network_base}.${i}" &
-    done
-    wait
-    end_time=$(date +%s)
-    echo -e "${BLUE}Scan completed in $((end_time - start_time)) seconds${NC}"
-}
-
-batch_parallel() {
-    local network_base="$1"
-    echo -e "${BLUE}Using controlled concurrency to prevent system overload...${NC}"
-    
-    scan_batch() {
-        local start=$1
-        local end=$2
-        for i in $(seq $start $end); do
-            if ping -c 1 -W 1 -q "${network_base}.${i}" > /dev/null 2>&1; then
-                echo -e "${GREEN}${network_base}.${i} is alive${NC}"
-            fi
-        done
-    }
-    
-    start_time=$(date +%s)
-    batch_size=25
-    
-    for batch_start in $(seq 1 $batch_size 254); do
-        batch_end=$((batch_start + batch_size - 1))
-        if [ $batch_end -gt 254 ]; then
-            batch_end=254
-        fi
-        scan_batch $batch_start $batch_end &
-    done
-    
-    wait
-    end_time=$(date +%s)
-    echo -e "${BLUE}Batch scan completed in $((end_time - start_time)) seconds${NC}"
-}
-
-nmap_scan() {
-    local network_base="$1"
-    echo -e "${BLUE}Using nmap for professional-grade network discovery...${NC}"
-    
-    start_time=$(date +%s)
-    nmap -sn -T5 --min-parallelism 100 --max-parallelism 255 "${network_base}.1-254" 2>/dev/null | \
-    grep -E "Nmap scan report for" | \
-    awk -v green="$GREEN" -v nc="$NC" '{print green $5 " is alive" nc}'
-    
-    end_time=$(date +%s)
-    echo -e "${BLUE}nmap scan completed in $((end_time - start_time)) seconds${NC}"
-}
-
-fping_scan() {
-    local network_base="$1"
-    echo -e "${BLUE}Using fping - the parallel ping specialist...${NC}"
-    
-    start_time=$(date +%s)
-    echo -e "${GREEN}Active hosts found:${NC}"
-    fping -g -r 1 -t 100 -a -q "${network_base}.1" "${network_base}.254" 2>/dev/null | \
-    while read host; do
-        echo -e "${GREEN}$host is alive${NC}"
-    done
-    
-    end_time=$(date +%s)
-    echo -e "${BLUE}fping scan completed in $((end_time - start_time)) seconds${NC}"
-}
-
-masscan_scan() {
-    local network_base="$1"
-    echo -e "${BLUE}Using masscan - the extreme speed scanner...${NC}"
-    echo -e "${YELLOW}Note: This will perform a ping scan using ICMP${NC}"
-    
-    start_time=$(date +%s)
-    
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${YELLOW}masscan requires root privileges. Running with sudo...${NC}"
-        sudo masscan "${network_base}.0/24" --ping --rate 1000 --wait 2 2>/dev/null | \
-        grep -oE "${network_base}\.[0-9]+" | \
-        sort -V | uniq | \
-        while read host; do
-            echo -e "${GREEN}$host is alive${NC}"
-        done
-    else
-        masscan "${network_base}.0/24" --ping --rate 1000 --wait 2 2>/dev/null | \
-        grep -oE "${network_base}\.[0-9]+" | \
-        sort -V | uniq | \
-        while read host; do
-            echo -e "${GREEN}$host is alive${NC}"
-        done
-    fi
-    
-    end_time=$(date +%s)
-    echo -e "${BLUE}masscan completed in $((end_time - start_time)) seconds${NC}"
+    read -p "Select method (1-4): " method
 }
 
 # Main execution starts here
 clear
 echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-echo -e "${PURPLE}║   🥷 huntr Network IP Stealth Sweeper     ║${NC}"
-echo -e "${PURPLE}║   by 0xb0rn3 | oxbv1 IG: theehiv3         ║${NC}"
-echo -e "${PURPLE}║   Enhanced with Maximum Stealth Features  ║${NC}"
+echo -e "${PURPLE}║   🥷 Enhanced Network Stealth Sweeper     ║${NC}"
+echo -e "${PURPLE}║   Advanced Nmap Integration & Filtering   ║${NC}"
+echo -e "${PURPLE}║   Optimized for Speed and Stealth         ║${NC}"
 echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
 echo ""
 
 # Check and install dependencies
 check_and_install_deps
+
+# Verify nmap is available
+if ! $HAVE_NMAP; then
+    echo -e "${RED}ERROR: nmap is required but not available${NC}"
+    echo -e "${YELLOW}Please install nmap manually and run the script again${NC}"
+    exit 1
+fi
 
 # Get network base from user
 read -p "Enter network base (e.g., 192.168.1): " network_base
@@ -528,66 +460,25 @@ if ! [[ $network_base =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
     exit 1
 fi
 
-# Show stealth menu and handle selection
-show_stealth_menu
+# Show enhanced menu and handle selection
+show_enhanced_menu
 
 case $method in
     1)
-        stealth_ping "$network_base"
+        ultra_stealth_nmap "$network_base"
         ;;
     2)
-        optimized_ping "$network_base"
+        fast_nmap_discovery "$network_base"
         ;;
     3)
-        batch_parallel "$network_base"
+        ultra_stealth_nmap "$network_base"
+        echo ""
+        nmap_port_discovery "$network_base" "stealth"
         ;;
-    "$STEALTH_NMAP_OPTION")
-        if $HAVE_NMAP; then
-            stealth_nmap "$network_base"
-        else
-            echo -e "${RED}nmap is not available${NC}"
-            exit 1
-        fi
-        ;;
-    "$NMAP_OPTION")
-        if $HAVE_NMAP; then
-            nmap_scan "$network_base"
-        else
-            echo -e "${RED}nmap is not available${NC}"
-            exit 1
-        fi
-        ;;
-    "$STEALTH_FPING_OPTION")
-        if $HAVE_FPING; then
-            stealth_fping "$network_base"
-        else
-            echo -e "${RED}fping is not available${NC}"
-            exit 1
-        fi
-        ;;
-    "$FPING_OPTION")
-        if $HAVE_FPING; then
-            fping_scan "$network_base"
-        else
-            echo -e "${RED}fping is not available${NC}"
-            exit 1
-        fi
-        ;;
-    "$STEALTH_MASSCAN_OPTION")
-        if $HAVE_MASSCAN; then
-            stealth_masscan "$network_base"
-        else
-            echo -e "${RED}masscan is not available${NC}"
-            exit 1
-        fi
-        ;;
-    "$MASSCAN_OPTION")
-        if $HAVE_MASSCAN; then
-            masscan_scan "$network_base"
-        else
-            echo -e "${RED}masscan is not available${NC}"
-            exit 1
-        fi
+    4)
+        fast_nmap_discovery "$network_base"
+        echo ""
+        nmap_port_discovery "$network_base" "fast"
         ;;
     *)
         echo -e "${RED}Invalid option selected${NC}"
@@ -596,8 +487,18 @@ case $method in
 esac
 
 echo ""
-echo -e "${PURPLE}=== 🥷 Stealth Performance Guide ===${NC}"
-echo -e "${GREEN}Stealth Level:${NC} stealth_ping > stealth_nmap > stealth_fping > stealth_masscan"
-echo -e "${GREEN}Speed vs Stealth:${NC} Higher stealth = Lower speed but much harder to detect"
-echo -e "${GREEN}Detection Avoidance:${NC} Randomized timing, packet fragmentation, decoy IPs"
-echo -e "${YELLOW}Pro Tip:${NC} Use stealth modes for penetration testing, regular modes for network admin tasks"
+echo -e "${PURPLE}=== 🎯 Enhanced Nmap Performance Guide ===${NC}"
+echo -e "${GREEN}Key Improvements:${NC}"
+echo "• XML output parsing for reliable results"
+echo "• Intelligent decoy placement near target range"
+echo "• Multi-probe discovery (ICMP + TCP ACK)"
+echo "• Hostname resolution from scan results"
+echo "• Comprehensive scan statistics"
+echo "• Optional port discovery on found hosts"
+echo ""
+echo -e "${YELLOW}Technical Details:${NC}"
+echo "• Uses nmap's native timing templates (T1-T4)"
+echo "• Parallel processing with smart limits"
+echo "• Automatic retry and timeout handling"
+echo "• Memory-efficient result processing"
+echo -e "${CYAN}Pro Tip:${NC} Use method 2 for network admin tasks, method 1 for penetration testing"
