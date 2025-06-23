@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+
+# Color codes for better user experience
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Global variables to track what we have available
+HAVE_NMAP=false
+HAVE_FPING=false
+HAVE_MASSCAN=false
+
+# Function to detect the package manager and OS
+detect_package_manager() {
+    if command -v apt-get &> /dev/null; then
+        echo "apt"
+    elif command -v yum &> /dev/null; then
+        echo "yum"
+    elif command -v dnf &> /dev/null; then
+        echo "dnf"
+    elif command -v pacman &> /dev/null; then
+        echo "pacman"
+    elif command -v zypper &> /dev/null; then
+        echo "zypper"
+    elif command -v apk &> /dev/null; then
+        echo "apk"
+    else
+        echo "unknown"
+    fi
+}
+
+# Function to check network connectivity quickly
+check_network() {
+    echo -ne "${BLUE}Checking network connectivity...${NC}"
+    if ping -c 1 -W 2 8.8.8.8 &> /dev/null || ping -c 1 -W 2 1.1.1.1 &> /dev/null; then
+        echo -e " ${GREEN}✓ Online${NC}"
+        return 0
+    else
+        echo -e " ${RED}✗ Offline${NC}"
+        echo -e "${YELLOW}Warning: No internet connection detected. Cannot install missing tools.${NC}"
+        return 1
+    fi
+}
+
+# Function to install a package based on the detected package manager
+install_package() {
+    local package_name="$1"
+    local pkg_manager="$2"
+    
+    case $pkg_manager in
+        "apt")
+            sudo apt-get update &> /dev/null && sudo apt-get install -y "$package_name" &> /dev/null
+            ;;
+        "yum")
+            sudo yum install -y "$package_name" &> /dev/null
+            ;;
+        "dnf")
+            sudo dnf install -y "$package_name" &> /dev/null
+            ;;
+        "pacman")
+            sudo pacman -Sy --noconfirm "$package_name" &> /dev/null
+            ;;
+        "zypper")
+            sudo zypper install -y "$package_name" &> /dev/null
+            ;;
+        "apk")
+            sudo apk add "$package_name" &> /dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Function to check and install dependencies with smart detection
+check_and_install_deps() {
+    local pkg_manager
+    local network_ok=true
+    
+    echo -e "${BLUE}=== Dependency Check & Auto-Installation ===${NC}"
+    
+    # Quick network check first
+    if ! check_network; then
+        network_ok=false
+    fi
+    
+    # Detect package manager
+    pkg_manager=$(detect_package_manager)
+    if [ "$pkg_manager" = "unknown" ]; then
+        echo -e "${YELLOW}Warning: Unknown package manager. Manual installation may be required.${NC}"
+    fi
+    
+    # Check each tool and install if missing
+    echo -ne "${BLUE}Checking nmap...${NC}"
+    if command -v nmap &> /dev/null; then
+        echo -e " ${GREEN}✓ Found${NC}"
+        HAVE_NMAP=true
+    else
+        echo -ne " ${YELLOW}Missing${NC}"
+        if $network_ok && [ "$pkg_manager" != "unknown" ]; then
+            echo -ne " - Installing..."
+            if install_package "nmap" "$pkg_manager"; then
+                echo -e " ${GREEN}✓ Installed${NC}"
+                HAVE_NMAP=true
+            else
+                echo -e " ${RED}✗ Failed${NC}"
+            fi
+        else
+            echo -e " ${RED}✗ Cannot install (no network/unknown package manager)${NC}"
+        fi
+    fi
+    
+    echo -ne "${BLUE}Checking fping...${NC}"
+    if command -v fping &> /dev/null; then
+        echo -e " ${GREEN}✓ Found${NC}"
+        HAVE_FPING=true
+    else
+        echo -ne " ${YELLOW}Missing${NC}"
+        if $network_ok && [ "$pkg_manager" != "unknown" ]; then
+            echo -ne " - Installing..."
+            if install_package "fping" "$pkg_manager"; then
+                echo -e " ${GREEN}✓ Installed${NC}"
+                HAVE_FPING=true
+            else
+                echo -e " ${RED}✗ Failed${NC}"
+            fi
+        else
+            echo -e " ${RED}✗ Cannot install (no network/unknown package manager)${NC}"
+        fi
+    fi
+    
+    echo -ne "${BLUE}Checking masscan...${NC}"
+    if command -v masscan &> /dev/null; then
+        echo -e " ${GREEN}✓ Found${NC}"
+        HAVE_MASSCAN=true
+    else
+        echo -ne " ${YELLOW}Missing${NC}"
+        if $network_ok && [ "$pkg_manager" != "unknown" ]; then
+            echo -ne " - Installing..."
+            if install_package "masscan" "$pkg_manager"; then
+                echo -e " ${GREEN}✓ Installed${NC}"
+                HAVE_MASSCAN=true
+            else
+                echo -e " ${RED}✗ Failed${NC}"
+            fi
+        else
+            echo -e " ${RED}✗ Cannot install (no network/unknown package manager)${NC}"
+        fi
+    fi
+    
+    # Clean package cache to save space (suppress output)
+    if $network_ok && [ "$pkg_manager" != "unknown" ]; then
+        echo -ne "${BLUE}Cleaning package cache...${NC}"
+        case $pkg_manager in
+            "apt") sudo apt-get autoremove -y &> /dev/null && sudo apt-get autoclean &> /dev/null ;;
+            "yum") sudo yum clean all &> /dev/null ;;
+            "dnf") sudo dnf clean all &> /dev/null ;;
+            "pacman") sudo pacman -Sc --noconfirm &> /dev/null ;;
+            "zypper") sudo zypper clean -a &> /dev/null ;;
+            "apk") sudo apk cache clean &> /dev/null ;;
+        esac
+        echo -e " ${GREEN}✓ Done${NC}"
+    fi
+    
+    echo ""
+}
+
+# Function to display available scanning methods based on installed tools
+show_menu() {
+    echo -e "${BLUE}=== Network Sweeper - Available Methods ===${NC}"
+    echo "1. Optimized ping (always available)"
+    echo "2. Batch parallel (always available)"
+    
+    local option_counter=3
+    
+    if $HAVE_NMAP; then
+        echo "$option_counter. Ultra-fast nmap scan ${GREEN}[Available]${NC}"
+        NMAP_OPTION=$option_counter
+        ((option_counter++))
+    else
+        echo "X. Ultra-fast nmap scan ${RED}[Not Available]${NC}"
+    fi
+    
+    if $HAVE_FPING; then
+        echo "$option_counter. Lightning-fast fping ${GREEN}[Available]${NC}"
+        FPING_OPTION=$option_counter
+        ((option_counter++))
+    else
+        echo "X. Lightning-fast fping ${RED}[Not Available]${NC}"
+    fi
+    
+    if $HAVE_MASSCAN; then
+        echo "$option_counter. Extreme speed masscan ${GREEN}[Available]${NC}"
+        MASSCAN_OPTION=$option_counter
+        ((option_counter++))
+    else
+        echo "X. Extreme speed masscan ${RED}[Not Available]${NC}"
+    fi
+    
+    echo ""
+    read -p "Select method (1-$((option_counter-1))): " method
+}
+
+# Enhanced scanning functions with better error handling
+optimized_ping() {
+    local network_base="$1"
+    echo -e "${BLUE}Using optimized ping with aggressive timeouts...${NC}"
+    
+    fast_ping() {
+        local ip=$1
+        if ping -c 1 -W 1 -q "$ip" > /dev/null 2>&1; then
+            echo -e "${GREEN}$ip is alive${NC}"
+        fi
+    }
+    
+    start_time=$(date +%s)
+    for i in {1..254}; do
+        fast_ping "${network_base}.${i}" &
+    done
+    wait
+    end_time=$(date +%s)
+    echo -e "${BLUE}Scan completed in $((end_time - start_time)) seconds${NC}"
+}
+
+batch_parallel() {
+    local network_base="$1"
+    echo -e "${BLUE}Using controlled concurrency to prevent system overload...${NC}"
+    
+    scan_batch() {
+        local start=$1
+        local end=$2
+        for i in $(seq $start $end); do
+            if ping -c 1 -W 1 -q "${network_base}.${i}" > /dev/null 2>&1; then
+                echo -e "${GREEN}${network_base}.${i} is alive${NC}"
+            fi
+        done
+    }
+    
+    start_time=$(date +%s)
+    batch_size=25
+    
+    for batch_start in $(seq 1 $batch_size 254); do
+        batch_end=$((batch_start + batch_size - 1))
+        if [ $batch_end -gt 254 ]; then
+            batch_end=254
+        fi
+        scan_batch $batch_start $batch_end &
+    done
+    
+    wait
+    end_time=$(date +%s)
+    echo -e "${BLUE}Batch scan completed in $((end_time - start_time)) seconds${NC}"
+}
+
+nmap_scan() {
+    local network_base="$1"
+    echo -e "${BLUE}Using nmap for professional-grade network discovery...${NC}"
+    
+    start_time=$(date +%s)
+    nmap -sn -T5 --min-parallelism 100 --max-parallelism 255 "${network_base}.1-254" 2>/dev/null | \
+    grep -E "Nmap scan report for" | \
+    awk -v green="$GREEN" -v nc="$NC" '{print green $5 " is alive" nc}'
+    
+    end_time=$(date +%s)
+    echo -e "${BLUE}nmap scan completed in $((end_time - start_time)) seconds${NC}"
+}
+
+fping_scan() {
+    local network_base="$1"
+    echo -e "${BLUE}Using fping - the parallel ping specialist...${NC}"
+    
+    start_time=$(date +%s)
+    echo -e "${GREEN}Active hosts found:${NC}"
+    fping -g -r 1 -t 100 -a -q "${network_base}.1" "${network_base}.254" 2>/dev/null | \
+    while read host; do
+        echo -e "${GREEN}$host is alive${NC}"
+    done
+    
+    end_time=$(date +%s)
+    echo -e "${BLUE}fping scan completed in $((end_time - start_time)) seconds${NC}"
+}
+
+masscan_scan() {
+    local network_base="$1"
+    echo -e "${BLUE}Using masscan - the extreme speed scanner...${NC}"
+    echo -e "${YELLOW}Note: This will perform a ping scan using ICMP${NC}"
+    
+    start_time=$(date +%s)
+    
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${YELLOW}masscan requires root privileges. Running with sudo...${NC}"
+        sudo masscan "${network_base}.0/24" --ping --rate 1000 --wait 2 2>/dev/null | \
+        grep -oE "${network_base}\.[0-9]+" | \
+        sort -V | uniq | \
+        while read host; do
+            echo -e "${GREEN}$host is alive${NC}"
+        done
+    else
+        masscan "${network_base}.0/24" --ping --rate 1000 --wait 2 2>/dev/null | \
+        grep -oE "${network_base}\.[0-9]+" | \
+        sort -V | uniq | \
+        while read host; do
+            echo -e "${GREEN}$host is alive${NC}"
+        done
+    fi
+    
+    end_time=$(date +%s)
+    echo -e "${BLUE}masscan completed in $((end_time - start_time)) seconds${NC}"
+}
+
+# Main execution starts here
+clear
+echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║   huntr Network IP sweeper tool      ║${NC}"
+echo -e "${BLUE}║  by 0xb0rn3 | oxbv1 IG: theehiv3     ║${NC}"
+echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
+echo ""
+
+# Check and install dependencies
+check_and_install_deps
+
+# Get network base from user
+read -p "Enter network base (e.g., 192.168.1): " network_base
+
+# Validate network base format (basic check)
+if ! [[ $network_base =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    echo -e "${RED}Invalid network format. Please use format like: 192.168.1${NC}"
+    exit 1
+fi
+
+# Show menu and handle selection
+show_menu
+
+case $method in
+    1)
+        optimized_ping "$network_base"
+        ;;
+    2)
+        batch_parallel "$network_base"
+        ;;
+    "$NMAP_OPTION")
+        if $HAVE_NMAP; then
+            nmap_scan "$network_base"
+        else
+            echo -e "${RED}nmap is not available${NC}"
+            exit 1
+        fi
+        ;;
+    "$FPING_OPTION")
+        if $HAVE_FPING; then
+            fping_scan "$network_base"
+        else
+            echo -e "${RED}fping is not available${NC}"
+            exit 1
+        fi
+        ;;
+    "$MASSCAN_OPTION")
+        if $HAVE_MASSCAN; then
+            masscan_scan "$network_base"
+        else
+            echo -e "${RED}masscan is not available${NC}"
+            exit 1
+        fi
+        ;;
+    *)
+        echo -e "${RED}Invalid option selected${NC}"
+        exit 1
+        ;;
+esac
+
+echo ""
+echo -e "${BLUE}=== Performance & Reliability Guide ===${NC}"
+echo -e "${GREEN}Speed ranking:${NC} masscan > fping > nmap > batch parallel > basic ping"
+echo -e "${GREEN}Reliability ranking:${NC} nmap > batch parallel > basic ping > fping > masscan"
+echo -e "${GREEN}Best balance:${NC} fping offers excellent speed with good reliability for most use cases"
