@@ -437,7 +437,7 @@ clear
 echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
 echo -e "${PURPLE}║   🥷 Enhanced Network Stealth Sweeper     ║${NC}"
 echo -e "${PURPLE}║   Advanced Nmap Integration & Filtering   ║${NC}"
-echo -e "${PURPLE}║   Optimized for Speed and Stealth         ║${NC}"
+echo -e "${PURPLE}║Optimized for Speed and Stealth by 0xb0rn3  ║${NC}"
 echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -485,20 +485,4 @@ case $method in
         exit 1
         ;;
 esac
-
-echo ""
-echo -e "${PURPLE}=== 🎯 Enhanced Nmap Performance Guide ===${NC}"
-echo -e "${GREEN}Key Improvements:${NC}"
-echo "• XML output parsing for reliable results"
-echo "• Intelligent decoy placement near target range"
-echo "• Multi-probe discovery (ICMP + TCP ACK)"
-echo "• Hostname resolution from scan results"
-echo "• Comprehensive scan statistics"
-echo "• Optional port discovery on found hosts"
-echo ""
-echo -e "${YELLOW}Technical Details:${NC}"
-echo "• Uses nmap's native timing templates (T1-T4)"
-echo "• Parallel processing with smart limits"
-echo "• Automatic retry and timeout handling"
-echo "• Memory-efficient result processing"
 echo -e "${CYAN}Pro Tip:${NC} Use method 2 for network admin tasks, method 1 for penetration testing"
