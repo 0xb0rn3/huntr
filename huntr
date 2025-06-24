@@ -23,6 +23,15 @@ HAVE_FPING=false
 HAVE_MASSCAN=false
 HAVE_HPING3=false
 
+# Load v6module if available
+V6_MODULE_AVAILABLE=false
+if [[ -f "./v6module.sh" ]]; then
+    source "./.v6module"
+    V6_MODULE_AVAILABLE=true
+    echo -e "${GREEN}✅ v6module loaded${NC}"
+else
+    echo -e "${YELLOW}⚠️  v6module not found. Advanced features disabled.${NC}"
+fi
 # Enhanced stealth configuration variables
 STEALTH_MODE=false
 RANDOMIZE_ORDER=true
@@ -657,11 +666,11 @@ show_version() {
 # Enhanced menu with improved nmap options
 show_enhanced_menu() {
     echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║    🥷 $TOOL_NAME - Network Stealth Sweeper     ║${NC}"
-    echo -e "${PURPLE}║    Advanced Nmap Integration & Filtering   ║${NC}"
-    echo -e "${PURPLE}║                 v$TOOL_VERSION                   ║${NC}"
-    echo -e "${PURPLE}║         Developed by $DEVELOPER         ║${NC}"
-    echo -e "${PURPLE}║         IG: @$DEVELOPER_IG | $GITHUB_URL ║${NC}"
+    echo -e "${PURPLE}║    🥷 $TOOL_NAME - Network Stealth Sweeper ║${NC}"
+    echo -e "${PURPLE}║     Nmap Integration & Filtering           ║${NC}"
+    echo -e "${PURPLE}║             v$TOOL_VERSION                 ║${NC}"
+    echo -e "${PURPLE}║         Developed by $DEVELOPER            ║${NC}"
+    echo -e "${PURPLE}║     IG: @$DEVELOPER_IG | $GITHUB_URL       ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo -e "${CYAN}Features: Intelligent filtering, XML parsing, advanced discovery${NC}"
     echo ""
@@ -670,6 +679,19 @@ show_enhanced_menu() {
     echo "2. ⚡ Fast optimized nmap (intelligent discovery)"
     echo "3. 🔍 Stealth + Port discovery (comprehensive)"
     echo "4. 🔍 Fast + Port discovery (quick comprehensive)"
+    
+    # Show v6module options if available
+    if $V6_MODULE_AVAILABLE; then
+        echo ""
+        echo -e "${CYAN}Enhanced Features (v6module):${NC}"
+        echo "5. 🌐 IPv6 + IPv4 dual-stack scan"
+        echo "6. 📡 UDP + TCP comprehensive scan"
+        echo "7. 🖥️  OS fingerprinting + services"
+        echo "8. 🚨 Full vulnerability assessment"
+        echo "9. 📶 ARP + topology mapping"
+        echo "10. 🔧 Configure v6module settings"
+    fi
+    
     echo ""
     echo -e "${YELLOW}Nmap Configuration:${NC}"
     echo "• Parallel hosts: $NMAP_PARALLEL_MIN-$NMAP_PARALLEL_MAX"
@@ -677,7 +699,12 @@ show_enhanced_menu() {
     echo "• Discovery probes: Multiple ICMP + TCP ACK"
     echo "• XML parsing: $(command -v xmllint &> /dev/null && echo "Enhanced" || echo "Basic")"
     echo ""
-    read -p "Select method (1-4): " method
+    
+    if $V6_MODULE_AVAILABLE; then
+        read -p "Select method (1-10): " method
+    else
+        read -p "Select method (1-4): " method
+    fi
 }
 
 # Command line argument handling
@@ -752,7 +779,9 @@ main() {
         echo -e "${YELLOW}Please install nmap manually and run the script again${NC}"
         exit 1
     fi
-
+    if $V6_MODULE_AVAILABLE; then
+        init_v6_module
+    fi
     # Get network base from user
     read -p "Enter network base (e.g., 192.168.1): " network_base
 
@@ -781,6 +810,54 @@ main() {
             fast_nmap_discovery "$network_base"
             echo ""
             nmap_port_discovery "$network_base" "fast"
+            ;;
+        5)
+            if $V6_MODULE_AVAILABLE; then
+                init_v6_module
+                enhanced_network_scan "$network_base" "stealth" "ipv6,arp,report"
+            else
+                echo -e "${RED}v6module not available${NC}"
+            fi
+            ;;
+        6)
+            if $V6_MODULE_AVAILABLE; then
+                init_v6_module
+                enhanced_network_scan "$network_base" "fast" "udp,tcp,report"
+            else
+                echo -e "${RED}v6module not available${NC}"
+            fi
+            ;;
+        7)
+            if $V6_MODULE_AVAILABLE; then
+                init_v6_module
+                enhanced_network_scan "$network_base" "fast" "os,service,report"
+            else
+                echo -e "${RED}v6module not available${NC}"
+            fi
+            ;;
+        8)
+            if $V6_MODULE_AVAILABLE; then
+                init_v6_module
+                enhanced_network_scan "$network_base" "stealth" "vuln,service,report"
+            else
+                echo -e "${RED}v6module not available${NC}"
+            fi
+            ;;
+        9)
+            if $V6_MODULE_AVAILABLE; then
+                init_v6_module
+                enhanced_network_scan "$network_base" "fast" "arp,topology,report"
+            else
+                echo -e "${RED}v6module not available${NC}"
+            fi
+            ;;
+        10)
+            if $V6_MODULE_AVAILABLE; then
+                show_v6_menu
+                # Handle v6 menu selection here
+            else
+                echo -e "${RED}v6module not available${NC}"
+            fi
             ;;
         *)
             echo -e "${RED}Invalid option selected${NC}"
