@@ -668,11 +668,11 @@ show_version() {
 # Enhanced menu with improved nmap options
 show_enhanced_menu() {
     echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║   🥷 $TOOL_NAME - Network Stealth Sweeper ║${NC}"
-    echo -e "${PURPLE}║       Nmap Integration & Filtering       ║${NC}"
-    echo -e "${PURPLE}║              v$TOOL_VERSION              ║${NC}"
-    echo -e "${PURPLE}║        Developed by $DEVELOPER         ║${NC}"
-    echo -e "${PURPLE}║    IG: @$DEVELOPER_IG | $GITHUB_URL    ║${NC}"
+    echo -e "${PURPLE}║   🥷 $TOOL_NAME - Network Stealth Sweeper  ║${NC}"
+    echo -e "${PURPLE}║       Nmap Integration & Filtering         ║${NC}"
+    echo -e "${PURPLE}║           v$TOOL_VERSION                   ║${NC}"
+    echo -e "${PURPLE}║        Developed by $DEVELOPER             ║${NC}"
+    echo -e "${PURPLE}║    IG: @$DEVELOPER_IG | $GITHUB_URL        ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo -e "${CYAN}Features: Intelligent filtering, XML parsing, advanced discovery${NC}"
     echo ""
