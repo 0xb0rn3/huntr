@@ -25,7 +25,7 @@ HAVE_HPING3=false
 
 # Load v6module if available
 V6_MODULE_AVAILABLE=false
-if [[ -f "./v6module.sh" ]]; then
+if [[ -f "./.v6module" ]]; then
     source "./.v6module"
     V6_MODULE_AVAILABLE=true
     echo -e "${GREEN}✅ v6module loaded${NC}"
