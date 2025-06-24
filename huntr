@@ -1,45 +1,3 @@
-Of course, I can help you with that. The error you're seeing, `syntax error near unexpected token '}'`, is a classic issue in shell scripting that almost always points to an unclosed block of code.
-
-After reviewing your `huntr` script, I've located the problem.
-
-### The Cause of the Error
-
-The error occurs because an `if` statement inside the `check_and_install_deps()` function is not correctly closed with its corresponding `fi` token.
-
-Here is the problematic section within the `check_and_install_deps()` function:
-
-```bash
-# ... (inside check_and_install_deps function)
-    if $V6_MODULE_AVAILABLE; then
-        init_v6_module
-    # Detect package manager
-    pkg_manager=$(detect_package_manager)
-# ...
-```
-
-The line `if $V6_MODULE_AVAILABLE; then` opens a conditional block, but it's never closed. The script continues, and the shell parser only flags an error when it reaches the final `}` of the `main()` function (on line 581), as it's an unexpected token in the context of the still-open `if` block.
-
-### The Solution
-
-To fix this, you simply need to add a `fi` to close the conditional block before the script proceeds to detect the package manager.
-
-Here is the corrected snippet:
-
-```bash
-# ... (inside check_and_install_deps function)
-    if $V6_MODULE_AVAILABLE; then
-        init_v6_module
-    fi
-    # Detect package manager
-    pkg_manager=$(detect_package_manager)
-# ...
-```
-
-### Fully Corrected Script
-
-For your convenience, here is the entire script with the fix applied. You can replace the content of your `huntr` file with the code below.
-
-```bash
 #!/usr/bin/env bash
 
 # Tool Information
@@ -918,4 +876,3 @@ main() {
 
 # Execute main function with all arguments
 main "$@"
-```
