@@ -1,3 +1,45 @@
+Of course, I can help you with that. The error you're seeing, `syntax error near unexpected token '}'`, is a classic issue in shell scripting that almost always points to an unclosed block of code.
+
+After reviewing your `huntr` script, I've located the problem.
+
+### The Cause of the Error
+
+The error occurs because an `if` statement inside the `check_and_install_deps()` function is not correctly closed with its corresponding `fi` token.
+
+Here is the problematic section within the `check_and_install_deps()` function:
+
+```bash
+# ... (inside check_and_install_deps function)
+    if $V6_MODULE_AVAILABLE; then
+        init_v6_module
+    # Detect package manager
+    pkg_manager=$(detect_package_manager)
+# ...
+```
+
+The line `if $V6_MODULE_AVAILABLE; then` opens a conditional block, but it's never closed. The script continues, and the shell parser only flags an error when it reaches the final `}` of the `main()` function (on line 581), as it's an unexpected token in the context of the still-open `if` block.
+
+### The Solution
+
+To fix this, you simply need to add a `fi` to close the conditional block before the script proceeds to detect the package manager.
+
+Here is the corrected snippet:
+
+```bash
+# ... (inside check_and_install_deps function)
+    if $V6_MODULE_AVAILABLE; then
+        init_v6_module
+    fi
+    # Detect package manager
+    pkg_manager=$(detect_package_manager)
+# ...
+```
+
+### Fully Corrected Script
+
+For your convenience, here is the entire script with the fix applied. You can replace the content of your `huntr` file with the code below.
+
+```bash
 #!/usr/bin/env bash
 
 # Tool Information
@@ -325,15 +367,15 @@ optimized_nmap_discovery() {
         discovery_method="-PE -PP -PM -PO"  # Multiple ICMP types for better coverage
         
         nmap_args="--randomize-hosts \
-                   --data-length $((RANDOM % 32 + 16)) \
-                   --ttl $((32 + RANDOM % 32)) \
-                   -D $decoys \
-                   --scan-delay $(get_random_delay 0.5 2.0) \
-                   --max-parallelism $NMAP_PARALLEL_MIN \
-                   --min-parallelism 5 \
-                   -f \
-                   --spoof-mac $(generate_random_mac) \
-                   --host-timeout $NMAP_HOST_TIMEOUT"
+                      --data-length $((RANDOM % 32 + 16)) \
+                      --ttl $((32 + RANDOM % 32)) \
+                      -D $decoys \
+                      --scan-delay $(get_random_delay 0.5 2.0) \
+                      --max-parallelism $NMAP_PARALLEL_MIN \
+                      --min-parallelism 5 \
+                      -f \
+                      --spoof-mac $(generate_random_mac) \
+                      --host-timeout $NMAP_HOST_TIMEOUT"
     else
         echo -e "${GREEN}⚡ FAST MODE: Optimized for speed and efficiency${NC}"
         
@@ -341,9 +383,9 @@ optimized_nmap_discovery() {
         discovery_method="-PE -PA80,443,22,21,25,53,135,139,445"  # TCP ACK to common ports
         
         nmap_args="--min-parallelism $NMAP_PARALLEL_MIN \
-                   --max-parallelism $NMAP_PARALLEL_MAX \
-                   --host-timeout $NMAP_HOST_TIMEOUT \
-                   --max-retries 2"
+                      --max-parallelism $NMAP_PARALLEL_MAX \
+                      --host-timeout $NMAP_HOST_TIMEOUT \
+                      --max-retries 2"
     fi
     
     start_time=$(date +%s)
@@ -390,9 +432,9 @@ optimized_nmap_discovery() {
         local hostname=""
         if grep -q "hostname.*name=\".*\".*type=\"PTR\"" "$temp_xml"; then
             hostname=$(grep -A5 -B5 "$ip_addr" "$temp_xml" | \
-                      grep -oE "hostname.*name=\"[^\"]*\"" | \
-                      head -1 | \
-                      sed 's/.*name="\([^"]*\)".*/\1/')
+                         grep -oE "hostname.*name=\"[^\"]*\"" | \
+                         head -1 | \
+                         sed 's/.*name="\([^"]*\)".*/\1/')
         fi
         
         # Display results with enhanced formatting
@@ -493,10 +535,10 @@ nmap_port_discovery() {
         
         # Parse and display open ports
         local open_ports=$(grep "Ports:" "$port_results" | \
-                          grep -oE "[0-9]+/open" | \
-                          cut -d'/' -f1 | \
-                          tr '\n' ',' | \
-                          sed 's/,$//')
+                             grep -oE "[0-9]+/open" | \
+                             cut -d'/' -f1 | \
+                             tr '\n' ',' | \
+                             sed 's/,$//')
         
         if [[ -n "$open_ports" ]]; then
             echo -e "${GREEN}  └─ Open ports: $open_ports${NC}"
@@ -535,6 +577,7 @@ check_and_install_deps() {
     fi
     if $V6_MODULE_AVAILABLE; then
         init_v6_module
+    fi
     # Detect package manager
     pkg_manager=$(detect_package_manager)
     if [ "$pkg_manager" = "unknown" ]; then
@@ -632,7 +675,7 @@ install_package() {
 # Function to show help information
 show_help() {
     echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║              $TOOL_NAME v$TOOL_VERSION Help              ║${NC}"
+    echo -e "${PURPLE}║              $TOOL_NAME v$TOOL_VERSION Help               ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Usage: $SCRIPT_NAME [OPTIONS]"
@@ -647,9 +690,9 @@ show_help() {
     echo "  Run without arguments to enter interactive mode with menu options"
     echo ""
     echo "Examples:"
-    echo "  $SCRIPT_NAME                    # Run in interactive mode"
-    echo "  $SCRIPT_NAME --update           # Force update check"
-    echo "  $SCRIPT_NAME --version          # Show version info"
+    echo "  $SCRIPT_NAME                  # Run in interactive mode"
+    echo "  $SCRIPT_NAME --update         # Force update check"
+    echo "  $SCRIPT_NAME --version        # Show version info"
     echo ""
 }
 
@@ -667,11 +710,11 @@ show_version() {
 # Enhanced menu with improved nmap options
 show_enhanced_menu() {
     echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║    🥷 $TOOL_NAME - Network Stealth Sweeper ║${NC}"
-    echo -e "${PURPLE}║     Nmap Integration & Filtering           ║${NC}"
-    echo -e "${PURPLE}║             v$TOOL_VERSION                 ║${NC}"
-    echo -e "${PURPLE}║         Developed by $DEVELOPER            ║${NC}"
-    echo -e "${PURPLE}║     IG: @$DEVELOPER_IG | $GITHUB_URL       ║${NC}"
+    echo -e "${PURPLE}║   🥷 $TOOL_NAME - Network Stealth Sweeper ║${NC}"
+    echo -e "${PURPLE}║       Nmap Integration & Filtering       ║${NC}"
+    echo -e "${PURPLE}║              v$TOOL_VERSION              ║${NC}"
+    echo -e "${PURPLE}║        Developed by $DEVELOPER         ║${NC}"
+    echo -e "${PURPLE}║    IG: @$DEVELOPER_IG | $GITHUB_URL    ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo -e "${CYAN}Features: Intelligent filtering, XML parsing, advanced discovery${NC}"
     echo ""
@@ -755,11 +798,11 @@ main() {
     
     clear
     echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║    🥷 $TOOL_NAME - Network Stealth Sweeper     ║${NC}"
-    echo -e "${PURPLE}║    Advanced Nmap Integration & Filtering   ║${NC}"
-    echo -e "${PURPLE}║                 v$TOOL_VERSION                   ║${NC}"
-    echo -e "${PURPLE}║         Developed by $DEVELOPER         ║${NC}"
-    echo -e "${PURPLE}║         IG: @$DEVELOPER_IG | GitHub: $GITHUB_REPO ║${NC}"
+    echo -e "${PURPLE}║   🥷 $TOOL_NAME - Network Stealth Sweeper   ║${NC}"
+    echo -e "${PURPLE}║   Advanced Nmap Integration & Filtering  ║${NC}"
+    echo -e "${PURPLE}║               v$TOOL_VERSION               ║${NC}"
+    echo -e "${PURPLE}║        Developed by $DEVELOPER         ║${NC}"
+    echo -e "${PURPLE}║       IG: @$DEVELOPER_IG | GitHub: $GITHUB_REPO ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -875,3 +918,4 @@ main() {
 
 # Execute main function with all arguments
 main "$@"
+```
