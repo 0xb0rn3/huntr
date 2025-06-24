@@ -533,7 +533,8 @@ check_and_install_deps() {
         echo -e "${YELLOW}Warning: No internet connection detected. Cannot install missing tools.${NC}"
         network_ok=false
     fi
-    
+    if $V6_MODULE_AVAILABLE; then
+        init_v6_module
     # Detect package manager
     pkg_manager=$(detect_package_manager)
     if [ "$pkg_manager" = "unknown" ]; then
@@ -778,9 +779,6 @@ main() {
         echo -e "${RED}ERROR: nmap is required but not available${NC}"
         echo -e "${YELLOW}Please install nmap manually and run the script again${NC}"
         exit 1
-    fi
-    if $V6_MODULE_AVAILABLE; then
-        init_v6_module
     fi
     # Get network base from user
     read -p "Enter network base (e.g., 192.168.1): " network_base
