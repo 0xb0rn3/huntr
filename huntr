@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Tool Information
+TOOL_NAME="Huntr"
+TOOL_VERSION="0.1.2"
+DEVELOPER="0xb0rn3 | 0xbv1"
+DEVELOPER_IG="theehiv3"
+GITHUB_REPO="0xb0rn3/huntr"
+GITHUB_URL="https://github.com/${GITHUB_REPO}"
+
 # Color codes for better user experience
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -27,6 +35,205 @@ NMAP_PARALLEL_MIN=10
 NMAP_PARALLEL_MAX=50
 NMAP_HOST_TIMEOUT="3s"
 NMAP_DISCOVERY_PROBES=4
+
+# Update check configuration
+UPDATE_CHECK_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+SCRIPT_NAME="$(basename "$0")"
+SCRIPT_PATH="$(realpath "$0")"
+
+# Function to compare version numbers (semantic versioning)
+version_compare() {
+    local version1="$1"
+    local version2="$2"
+    
+    # Remove 'v' prefix if present
+    version1=$(echo "$version1" | sed 's/^v//')
+    version2=$(echo "$version2" | sed 's/^v//')
+    
+    # Split versions into arrays
+    IFS='.' read -ra v1_parts <<< "$version1"
+    IFS='.' read -ra v2_parts <<< "$version2"
+    
+    # Pad arrays to same length
+    local max_length=${#v1_parts[@]}
+    if [ ${#v2_parts[@]} -gt $max_length ]; then
+        max_length=${#v2_parts[@]}
+    fi
+    
+    # Compare each part
+    for ((i=0; i<max_length; i++)); do
+        local part1=${v1_parts[i]:-0}
+        local part2=${v2_parts[i]:-0}
+        
+        if [ "$part1" -lt "$part2" ]; then
+            echo "less"
+            return
+        elif [ "$part1" -gt "$part2" ]; then
+            echo "greater"
+            return
+        fi
+    done
+    
+    echo "equal"
+}
+
+# Function to check for updates
+check_for_updates() {
+    local silent_mode="$1"  # If "silent", don't show checking message
+    
+    if [ "$silent_mode" != "silent" ]; then
+        echo -e "${BLUE}🔄 Checking for updates...${NC}"
+    fi
+    
+    # Check if we have internet connectivity
+    if ! ping -c 1 -W 2 8.8.8.8 &> /dev/null && ! ping -c 1 -W 2 1.1.1.1 &> /dev/null; then
+        if [ "$silent_mode" != "silent" ]; then
+            echo -e "${YELLOW}⚠️  No internet connection. Cannot check for updates.${NC}"
+        fi
+        return 1
+    fi
+    
+    # Check if curl is available
+    if ! command -v curl &> /dev/null; then
+        if [ "$silent_mode" != "silent" ]; then
+            echo -e "${YELLOW}⚠️  curl not found. Cannot check for updates.${NC}"
+        fi
+        return 1
+    fi
+    
+    # Fetch latest release information from GitHub API
+    local api_response
+    api_response=$(curl -s --connect-timeout 10 --max-time 30 "$UPDATE_CHECK_URL" 2>/dev/null)
+    
+    if [ $? -ne 0 ] || [ -z "$api_response" ]; then
+        if [ "$silent_mode" != "silent" ]; then
+            echo -e "${YELLOW}⚠️  Failed to fetch update information from GitHub.${NC}"
+        fi
+        return 1
+    fi
+    
+    # Parse the latest version from JSON response
+    local latest_version
+    if command -v jq &> /dev/null; then
+        # Use jq for precise JSON parsing if available
+        latest_version=$(echo "$api_response" | jq -r '.tag_name' 2>/dev/null)
+    else
+        # Fallback to grep/sed parsing
+        latest_version=$(echo "$api_response" | grep -o '"tag_name":"[^"]*"' | cut -d'"' -f4)
+    fi
+    
+    if [ -z "$latest_version" ] || [ "$latest_version" = "null" ]; then
+        if [ "$silent_mode" != "silent" ]; then
+            echo -e "${YELLOW}⚠️  Unable to parse version information.${NC}"
+        fi
+        return 1
+    fi
+    
+    # Compare versions
+    local comparison=$(version_compare "$TOOL_VERSION" "$latest_version")
+    
+    case $comparison in
+        "less")
+            echo -e "${GREEN}🆕 New version available: $latest_version (current: $TOOL_VERSION)${NC}"
+            return 0  # Update available
+            ;;
+        "equal")
+            if [ "$silent_mode" != "silent" ]; then
+                echo -e "${GREEN}✅ Running latest version ($TOOL_VERSION)${NC}"
+            fi
+            return 2  # Already latest
+            ;;
+        "greater")
+            if [ "$silent_mode" != "silent" ]; then
+                echo -e "${CYAN}🧪 Running development version ($TOOL_VERSION > $latest_version)${NC}"
+            fi
+            return 2  # Development version
+            ;;
+    esac
+    
+    return 1  # Error case
+}
+
+# Function to perform automatic update
+perform_update() {
+    echo -e "${BLUE}🔄 Starting automatic update process...${NC}"
+    
+    # Create temporary directory for download
+    local temp_dir=$(mktemp -d)
+    local temp_script="$temp_dir/$(basename "$SCRIPT_PATH")"
+    
+    echo -e "${CYAN}📥 Downloading latest version...${NC}"
+    
+    # Download the latest version
+    local download_url="https://raw.githubusercontent.com/${GITHUB_REPO}/main/$(basename "$SCRIPT_PATH")"
+    
+    if curl -s --connect-timeout 10 --max-time 60 -o "$temp_script" "$download_url"; then
+        # Verify the download
+        if [ -s "$temp_script" ] && head -1 "$temp_script" | grep -q "#!/usr/bin/env bash"; then
+            echo -e "${GREEN}✅ Download successful${NC}"
+            
+            # Make the new script executable
+            chmod +x "$temp_script"
+            
+            # Create backup of current version
+            local backup_path="${SCRIPT_PATH}.backup.$(date +%Y%m%d_%H%M%S)"
+            cp "$SCRIPT_PATH" "$backup_path"
+            echo -e "${CYAN}💾 Backup created: $backup_path${NC}"
+            
+            # Replace current script with new version
+            if cp "$temp_script" "$SCRIPT_PATH"; then
+                echo -e "${GREEN}🎉 Update completed successfully!${NC}"
+                echo -e "${CYAN}🔄 Restarting with new version...${NC}"
+                echo ""
+                
+                # Cleanup
+                rm -rf "$temp_dir"
+                
+                # Restart the script with the same arguments
+                exec "$SCRIPT_PATH" "$@"
+            else
+                echo -e "${RED}❌ Failed to replace script. Restoring backup...${NC}"
+                cp "$backup_path" "$SCRIPT_PATH"
+                rm -rf "$temp_dir"
+                return 1
+            fi
+        else
+            echo -e "${RED}❌ Downloaded file appears to be invalid${NC}"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    else
+        echo -e "${RED}❌ Download failed${NC}"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+}
+
+# Function to handle update process with user interaction
+handle_update_check() {
+    check_for_updates
+    local update_status=$?
+    
+    case $update_status in
+        0)  # Update available
+            echo ""
+            read -p "Would you like to update now? (y/N): " -n 1 -r
+            echo ""
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                perform_update "$@"
+            else
+                echo -e "${YELLOW}⏭️  Update skipped. You can update later by running: $SCRIPT_NAME --update${NC}"
+            fi
+            ;;
+        2)  # Already latest version
+            # Already handled in check_for_updates
+            ;;
+        *)  # Error or no connection
+            # Already handled in check_for_updates
+            ;;
+    esac
+    echo ""
+}
 
 # Function to generate random MAC address for spoofing
 generate_random_mac() {
@@ -412,9 +619,50 @@ install_package() {
     esac
 }
 
+# Function to show help information
+show_help() {
+    echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║              $TOOL_NAME v$TOOL_VERSION Help              ║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "Usage: $SCRIPT_NAME [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help      Show this help message"
+    echo "  -v, --version   Show version information"
+    echo "  -u, --update    Check for updates and update if available"
+    echo "  --check-update  Check for updates without prompting to install"
+    echo ""
+    echo "Interactive Mode:"
+    echo "  Run without arguments to enter interactive mode with menu options"
+    echo ""
+    echo "Examples:"
+    echo "  $SCRIPT_NAME                    # Run in interactive mode"
+    echo "  $SCRIPT_NAME --update           # Force update check"
+    echo "  $SCRIPT_NAME --version          # Show version info"
+    echo ""
+}
+
+# Function to show version information
+show_version() {
+    echo -e "${PURPLE}$TOOL_NAME v$TOOL_VERSION${NC}"
+    echo -e "${CYAN}Developer: $DEVELOPER${NC}"
+    echo -e "${CYAN}Instagram: @$DEVELOPER_IG${NC}"
+    echo -e "${CYAN}GitHub: $GITHUB_URL${NC}"
+    echo ""
+    echo -e "${BLUE}Advanced Network Discovery & Reconnaissance Tool${NC}"
+    echo -e "${GREEN}Features: Stealth scanning, intelligent filtering, auto-updates${NC}"
+}
+
 # Enhanced menu with improved nmap options
 show_enhanced_menu() {
-    echo -e "${PURPLE}=== 🥷 Enhanced Network Stealth Sweeper - Nmap Optimized ===${NC}"
+    echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║    🥷 $TOOL_NAME - Network Stealth Sweeper     ║${NC}"
+    echo -e "${PURPLE}║    Advanced Nmap Integration & Filtering   ║${NC}"
+    echo -e "${PURPLE}║                 v$TOOL_VERSION                   ║${NC}"
+    echo -e "${PURPLE}║         Developed by $DEVELOPER         ║${NC}"
+    echo -e "${PURPLE}║         IG: @$DEVELOPER_IG | $GITHUB_URL ║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo -e "${CYAN}Features: Intelligent filtering, XML parsing, advanced discovery${NC}"
     echo ""
     echo "Host Discovery Methods:"
@@ -432,57 +680,123 @@ show_enhanced_menu() {
     read -p "Select method (1-4): " method
 }
 
+# Command line argument handling
+handle_arguments() {
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        -u|--update)
+            echo -e "${BLUE}🔄 Forcing update check...${NC}"
+            check_for_updates
+            local update_status=$?
+            if [ $update_status -eq 0 ]; then
+                perform_update "${@:2}"
+            elif [ $update_status -eq 2 ]; then
+                echo -e "${GREEN}✅ No update needed. Running latest version.${NC}"
+            else
+                echo -e "${RED}❌ Update check failed.${NC}"
+            fi
+            exit 0
+            ;;
+        --check-update)
+            check_for_updates
+            exit 0
+            ;;
+        "")
+            # No arguments - continue to interactive mode
+            return 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+}
+
 # Main execution starts here
-clear
-echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-echo -e "${PURPLE}║   🥷 Enhanced Network Stealth Sweeper     ║${NC}"
-echo -e "${PURPLE}║   Advanced Nmap Integration & Filtering   ║${NC}"
-echo -e "${PURPLE}║Optimized for Speed and Stealth by 0xb0rn3  ║${NC}"
-echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
-echo ""
+main() {
+    # Handle command line arguments first
+    handle_arguments "$@"
+    
+    clear
+    echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
+    echo -e "${PURPLE}║    🥷 $TOOL_NAME - Network Stealth Sweeper     ║${NC}"
+    echo -e "${PURPLE}║    Advanced Nmap Integration & Filtering   ║${NC}"
+    echo -e "${PURPLE}║                 v$TOOL_VERSION                   ║${NC}"
+    echo -e "${PURPLE}║         Developed by $DEVELOPER         ║${NC}"
+    echo -e "${PURPLE}║         IG: @$DEVELOPER_IG | GitHub: $GITHUB_REPO ║${NC}"
+    echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
+    echo ""
 
-# Check and install dependencies
-check_and_install_deps
-
-# Verify nmap is available
-if ! $HAVE_NMAP; then
-    echo -e "${RED}ERROR: nmap is required but not available${NC}"
-    echo -e "${YELLOW}Please install nmap manually and run the script again${NC}"
-    exit 1
-fi
-
-# Get network base from user
-read -p "Enter network base (e.g., 192.168.1): " network_base
-
-# Validate network base format
-if ! [[ $network_base =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-    echo -e "${RED}Invalid network format. Please use format like: 192.168.1${NC}"
-    exit 1
-fi
-
-# Show enhanced menu and handle selection
-show_enhanced_menu
-
-case $method in
-    1)
-        ultra_stealth_nmap "$network_base"
-        ;;
-    2)
-        fast_nmap_discovery "$network_base"
-        ;;
-    3)
-        ultra_stealth_nmap "$network_base"
+    # Perform automatic update check (silent)
+    check_for_updates "silent"
+    local update_status=$?
+    if [ $update_status -eq 0 ]; then
+        echo -e "${GREEN}🆕 A new version is available! Use --update to upgrade.${NC}"
         echo ""
-        nmap_port_discovery "$network_base" "stealth"
-        ;;
-    4)
-        fast_nmap_discovery "$network_base"
-        echo ""
-        nmap_port_discovery "$network_base" "fast"
-        ;;
-    *)
-        echo -e "${RED}Invalid option selected${NC}"
+    fi
+
+    # Check and install dependencies
+    check_and_install_deps
+
+    # Verify nmap is available
+    if ! $HAVE_NMAP; then
+        echo -e "${RED}ERROR: nmap is required but not available${NC}"
+        echo -e "${YELLOW}Please install nmap manually and run the script again${NC}"
         exit 1
-        ;;
-esac
-echo -e "${CYAN}Pro Tip:${NC} Use method 2 for network admin tasks, method 1 for penetration testing"
+    fi
+
+    # Get network base from user
+    read -p "Enter network base (e.g., 192.168.1): " network_base
+
+    # Validate network base format
+    if ! [[ $network_base =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        echo -e "${RED}Invalid network format. Please use format like: 192.168.1${NC}"
+        exit 1
+    fi
+
+    # Show enhanced menu and handle selection
+    show_enhanced_menu
+
+    case $method in
+        1)
+            ultra_stealth_nmap "$network_base"
+            ;;
+        2)
+            fast_nmap_discovery "$network_base"
+            ;;
+        3)
+            ultra_stealth_nmap "$network_base"
+            echo ""
+            nmap_port_discovery "$network_base" "stealth"
+            ;;
+        4)
+            fast_nmap_discovery "$network_base"
+            echo ""
+            nmap_port_discovery "$network_base" "fast"
+            ;;
+        *)
+            echo -e "${RED}Invalid option selected${NC}"
+            exit 1
+            ;;
+    esac
+
+    echo ""
+    echo -e "${CYAN}💡 Pro Tips:${NC}"
+    echo -e "${GREEN}• Use method 2 for network admin tasks${NC}"
+    echo -e "${GREEN}• Use method 1 for penetration testing${NC}"
+    echo -e "${GREEN}• Run '$SCRIPT_NAME --update' to check for updates${NC}"
+    echo -e "${GREEN}• Visit $GITHUB_URL for documentation${NC}"
+    echo ""
+    echo -e "${PURPLE}Thank you for using $TOOL_NAME v$TOOL_VERSION by $DEVELOPER${NC}"
+}
+
+# Execute main function with all arguments
+main "$@"
