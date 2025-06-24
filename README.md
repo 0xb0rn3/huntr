@@ -51,10 +51,10 @@ git clone https://github.com/0xb0rn3/huntr.git
 cd huntr
 
 # Make executable
-chmod +x huntr.sh
+chmod +x huntr
 
 # Run (dependencies auto-install)
-./huntr.sh
+./huntr
 ```
 
 ### Manual Dependency Installation
@@ -74,22 +74,22 @@ sudo pacman -S nmap fping masscan hping bc coreutils libxml2
 
 ### Interactive Mode (Recommended)
 ```bash
-./huntr.sh
+./huntr
 ```
 
 ### Command Line Options
 ```bash
 # Show help
-./huntr.sh --help
+./huntr --help
 
 # Check version
-./huntr.sh --version
+./huntr --version
 
 # Force update check
-./huntr.sh --update
+./huntr --update
 
 # Silent update check
-./huntr.sh --check-update
+./huntr --check-update
 ```
 
 ## 🎮 Discovery Methods
