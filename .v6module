@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-
-# v6module.sh - Advanced Network Discovery Module
-# Version: 1.0.0
+# Version: 0.1.1
 # Enhanced features for Huntr tool
 
 # Color codes
@@ -14,7 +12,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Module configuration
-MODULE_VERSION="0.0.1"
+MODULE_VERSION="1.1.0"
 OUTPUT_DIR="./huntresults"
 CONFIG_FILE="./huntrconfig.conf"
 
@@ -125,10 +123,10 @@ udp_service_scan() {
     
     # Parse UDP results
     local udp_services=$(grep "Ports:" "$temp_results" | \
-                        grep -oE "[0-9]+/open/udp" | \
-                        cut -d'/' -f1 | \
-                        tr '\n' ',' | \
-                        sed 's/,$//')
+                           grep -oE "[0-9]+/open/udp" | \
+                           cut -d'/' -f1 | \
+                           tr '\n' ',' | \
+                           sed 's/,$//')
     
     if [[ -n "$udp_services" ]]; then
         echo -e "${GREEN}  └─ UDP Services: $udp_services${NC}"
@@ -151,8 +149,8 @@ os_fingerprint() {
     # Parse OS information
     if command -v xmllint &> /dev/null; then
         local os_info=$(xmllint --xpath "//osmatch/@name" "$temp_xml" 2>/dev/null | \
-                       head -1 | \
-                       sed 's/name="\([^"]*\)".*/\1/')
+                          head -1 | \
+                          sed 's/name="\([^"]*\)".*/\1/')
         
         if [[ -n "$os_info" ]]; then
             echo -e "${GREEN}  └─ OS: $os_info${NC}"
@@ -250,9 +248,9 @@ adaptive_timing_scan() {
     
     # Test network responsiveness
     local ping_time=$(ping -c 1 -W 2 "$target" 2>/dev/null | \
-                     grep "time=" | \
-                     grep -oE "time=[0-9.]+" | \
-                     cut -d'=' -f2)
+                      grep "time=" | \
+                      grep -oE "time=[0-9.]+" | \
+                      cut -d'=' -f2)
     
     if [[ -n "$ping_time" ]]; then
         local ping_ms=$(echo "$ping_time" | cut -d'.' -f1)
@@ -363,6 +361,372 @@ EOF
     echo -e "${GREEN}✅ Network map: $map_file${NC}"
 }
 
+#
+# >>> NEW FUNCTIONS ADDED HERE <<<
+#
+
+# HTTP Service Enumeration and Banner Grabbing
+http_service_enum() {
+    local network_base="$1"
+    local scan_type="$2"
+    local port_range="$3"
+    
+    echo -e "${CYAN}🌐 HTTP Service Enumeration & Banner Grabbing${NC}"
+    
+    # Set port range - default to 80 if not specified
+    if [[ -z "$port_range" ]]; then
+        port_range="80"
+    fi
+    
+    local temp_results=$(mktemp)
+    local timing=""
+    local additional_scripts=""
+    
+    # Configure based on scan type
+    if [[ "$scan_type" == "stealth" ]]; then
+        timing="T2"
+        additional_scripts="--script=banner,http-title"
+        echo -e "${PURPLE}🥷 Stealth HTTP enumeration with basic scripts${NC}"
+    else
+        timing="T5"
+        additional_scripts="--script=banner,http-title,http-headers,http-server-header"
+        echo -e "${GREEN}⚡ Aggressive HTTP enumeration with extended scripts${NC}"
+    fi
+    
+    echo -e "${BLUE}Scanning ${network_base}.0/24 on ports: $port_range${NC}"
+    
+    # Execute the nmap HTTP enumeration
+    nmap -n -Pn -sS -sV \
+         -p "$port_range" \
+         --open \
+         $additional_scripts \
+         -$timing \
+         "${network_base}.0/24" \
+         -oG - | grep 'open' | grep -v 'tcpwrapped' > "$temp_results"
+    
+    # Parse and display results
+    local http_count=0
+    echo -e "${GREEN}📋 HTTP Services Found:${NC}"
+    echo "----------------------------------------"
+    
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            ((http_count++))
+            
+            # Extract IP and port information
+            local ip=$(echo "$line" | grep -oE "Host: [0-9.]+" | cut -d' ' -f2)
+            local ports=$(echo "$line" | grep -oE "Ports: [^[:space:]]+" | cut -d' ' -f2)
+            
+            echo -e "${GREEN}🎯 $ip${NC}"
+            echo -e "${CYAN}  └─ Open HTTP ports: $ports${NC}"
+            
+            # Try to extract service versions and banners
+            local service_info=$(echo "$line" | grep -oE "Version: [^/]*" | sed 's/Version: //')
+            if [[ -n "$service_info" ]]; then
+                echo -e "${YELLOW}  └─ Service: $service_info${NC}"
+            fi
+        fi
+    done < "$temp_results"
+    
+    # Extended HTTP intelligence gathering
+    if [[ $http_count -gt 0 && "$scan_type" != "stealth" ]]; then
+        echo ""
+        echo -e "${CYAN}🔍 Extended HTTP Intelligence Gathering...${NC}"
+        
+        # Extract unique IPs for detailed scanning
+        local unique_ips=$(grep -oE "Host: [0-9.]+" "$temp_results" | cut -d' ' -f2 | sort -u)
+        
+        for ip in $unique_ips; do
+            echo -e "${BLUE}📡 Deep scanning $ip...${NC}"
+            
+            # HTTP title and header enumeration
+            local detail_results=$(mktemp)
+            nmap -n -Pn -sS -p80,443,8080,8443,8000,3000,5000 \
+                 --script=http-title,http-headers,http-server-header,http-methods \
+                 -T4 "$ip" > "$detail_results" 2>/dev/null
+            
+            # Parse detailed results
+            if grep -q "http-title" "$detail_results"; then
+                local title=$(grep -A1 "http-title" "$detail_results" | tail -1 | sed 's/|_//' | xargs)
+                echo -e "${GREEN}  └─ Title: $title${NC}"
+            fi
+            
+            if grep -q "Server:" "$detail_results"; then
+                local server=$(grep "Server:" "$detail_results" | head -1 | cut -d':' -f2 | xargs)
+                echo -e "${YELLOW}  └─ Server: $server${NC}"
+            fi
+            
+            rm -f "$detail_results"
+        done
+    fi
+    
+    rm -f "$temp_results"
+    
+    echo "----------------------------------------"
+    echo -e "${BLUE}📊 HTTP Enumeration Summary:${NC}"
+    echo -e "${GREEN}• HTTP services found: $http_count${NC}"
+    echo -e "${GREEN}• Port range scanned: $port_range${NC}"
+    echo -e "${GREEN}• Scan type: $scan_type${NC}"
+}
+
+# Full port sweep with service detection
+full_port_sweep() {
+    local target="$1"
+    local scan_type="$2"
+    
+    echo -e "${RED}🚨 Full Port Sweep: $target${NC}"
+    echo -e "${YELLOW}⚠️  This scan may take several minutes...${NC}"
+    
+    local temp_results=$(mktemp)
+    local timing=""
+    
+    if [[ "$scan_type" == "stealth" ]]; then
+        timing="T2"
+        echo -e "${PURPLE}🥷 Stealth full port scan${NC}"
+    else
+        timing="T4"
+        echo -e "${GREEN}⚡ Fast full port scan${NC}"
+    fi
+    
+    # Full TCP port scan
+    nmap -n -Pn -sS -sV -p- --open -$timing "$target" -oG "$temp_results" 2>/dev/null
+    
+    # Parse results
+    local open_ports=$(grep "Ports:" "$temp_results" | grep -oE "[0-9]+/open" | cut -d'/' -f1 | tr '\n' ',' | sed 's/,$//')
+    
+    if [[ -n "$open_ports" ]]; then
+        echo -e "${GREEN}  └─ All open ports: $open_ports${NC}"
+        
+        # Count total ports
+        local port_count=$(echo "$open_ports" | tr ',' '\n' | wc -l)
+        echo -e "${CYAN}  └─ Total open ports: $port_count${NC}"
+    else
+        echo -e "${YELLOW}  └─ No open ports found${NC}"
+    fi
+    
+    rm -f "$temp_results"
+}
+
+# Web application fingerprinting
+web_app_fingerprinting() {
+    local network_base="$1"
+    local scan_type="$2"
+    
+    echo -e "${PURPLE}🔬 Web Application Fingerprinting${NC}"
+    
+    local web_ports="80,443,8080,8443,8000,3000,5000,9000,8888,4443"
+    local temp_results=$(mktemp)
+    
+    # Comprehensive web app scripts
+    local web_scripts="http-title,http-headers,http-server-header,http-methods,http-robots.txt,http-enum,http-wordpress-enum,http-drupal-enum"
+    
+    if [[ "$scan_type" == "stealth" ]]; then
+        web_scripts="http-title,http-headers,http-server-header"
+        echo -e "${CYAN}🥷 Basic web fingerprinting${NC}"
+    else
+        echo -e "${GREEN}⚡ Comprehensive web fingerprinting${NC}"
+    fi
+    
+    nmap -n -Pn -sS -sV -p "$web_ports" --open \
+         --script="$web_scripts" \
+         -T4 "${network_base}.0/24" > "$temp_results" 2>/dev/null
+    
+    # Parse and categorize findings
+    echo -e "${GREEN}📋 Web Applications Discovered:${NC}"
+    echo "----------------------------------------"
+    
+    # Extract unique hosts with web services
+    local web_hosts=$(grep -B5 -A10 "http-" "$temp_results" | grep "Nmap scan report" | grep -oE "[0-9.]+" | sort -u)
+    
+    for host in $web_hosts; do
+        echo -e "${GREEN}🌐 $host${NC}"
+        
+        # Extract web-specific information for this host
+        grep -A20 "$host" "$temp_results" | while read -r line; do
+            if [[ "$line" == *"http-title"* ]]; then
+                local title=$(echo "$line" | grep -oE "\|.*" | sed 's/|_//')
+                echo -e "${CYAN}  └─ Title:$title${NC}"
+            elif [[ "$line" == *"Server:"* ]]; then
+                local server=$(echo "$line" | cut -d':' -f2- | xargs)
+                echo -e "${YELLOW}  └─ Server: $server${NC}"
+            elif [[ "$line" == *"robots.txt"* ]]; then
+                echo -e "${PURPLE}  └─ robots.txt found${NC}"
+            elif [[ "$line" == *"WordPress"* ]]; then
+                echo -e "${BLUE}  └─ WordPress detected${NC}"
+            elif [[ "$line" == *"Drupal"* ]]; then
+                echo -e "${BLUE}  └─ Drupal detected${NC}"
+            fi
+        done
+        echo ""
+    done
+    
+    rm -f "$temp_results"
+}
+
+# SMB/NetBIOS enumeration for Windows environments
+smb_enumeration() {
+    local network_base="$1"
+    local scan_type="$2"
+    
+    echo -e "${BLUE}🏢 SMB/NetBIOS Enumeration${NC}"
+    
+    local smb_ports="139,445"
+    local temp_results=$(mktemp)
+    local smb_scripts="smb-os-discovery,smb-protocols,smb-security-mode,smb-enum-shares"
+    
+    if [[ "$scan_type" == "stealth" ]]; then
+        smb_scripts="smb-os-discovery,smb-protocols"
+        echo -e "${PURPLE}🥷 Basic SMB enumeration${NC}"
+    else
+        echo -e "${GREEN}⚡ Comprehensive SMB enumeration${NC}"
+    fi
+    
+    nmap -n -Pn -sS -p "$smb_ports" --open \
+         --script="$smb_scripts" \
+         -T4 "${network_base}.0/24" > "$temp_results" 2>/dev/null
+    
+    # Parse SMB results
+    local smb_hosts=$(grep -B5 "smb-" "$temp_results" | grep "Nmap scan report" | grep -oE "[0-9.]+" | sort -u)
+    local smb_count=0
+    
+    echo -e "${GREEN}📋 SMB Hosts Discovered:${NC}"
+    echo "----------------------------------------"
+    
+    for host in $smb_hosts; do
+        ((smb_count++))
+        echo -e "${GREEN}🖥️  $host${NC}"
+        
+        # Extract SMB-specific info
+        grep -A15 "$host" "$temp_results" | while read -r line; do
+            if [[ "$line" == *"OS:"* ]]; then
+                local os_info=$(echo "$line" | cut -d':' -f2- | sed 's/|_//' | xargs)
+                echo -e "${CYAN}  └─ OS:$os_info${NC}"
+            elif [[ "$line" == *"Computer name:"* ]]; then
+                local computer_name=$(echo "$line" | cut -d':' -f2- | xargs)
+                echo -e "${YELLOW}  └─ Computer: $computer_name${NC}"
+            elif [[ "$line" == *"Domain name:"* ]]; then
+                local domain_name=$(echo "$line" | cut -d':' -f2- | xargs)
+                echo -e "${PURPLE}  └─ Domain: $domain_name${NC}"
+            elif [[ "$line" == *"Workgroup:"* ]]; then
+                local workgroup=$(echo "$line" | cut -d':' -f2- | xargs)
+                echo -e "${BLUE}  └─ Workgroup: $workgroup${NC}"
+            fi
+        done
+        echo ""
+    done
+    
+    echo -e "${BLUE}📊 SMB Summary: $smb_count hosts${NC}"
+    rm -f "$temp_results"
+}
+
+# Database service enumeration
+database_enum() {
+    local network_base="$1"
+    local scan_type="$2"
+    
+    echo -e "${RED}🗄️  Database Service Enumeration${NC}"
+    
+    local db_ports="1433,3306,5432,1521,27017,6379,11211,9200,9300"
+    local temp_results=$(mktemp)
+    
+    echo -e "${CYAN}Scanning for: MSSQL, MySQL, PostgreSQL, Oracle, MongoDB, Redis, Memcached, Elasticsearch${NC}"
+    
+    nmap -n -Pn -sS -sV -p "$db_ports" --open \
+         --script="banner,mysql-info,ms-sql-info,oracle-sid-brute,mongodb-info,redis-info" \
+         -T4 "${network_base}.0/24" -oG - | grep 'open' > "$temp_results"
+    
+    local db_count=0
+    echo -e "${GREEN}📋 Database Services Found:${NC}"
+    echo "----------------------------------------"
+    
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            ((db_count++))
+            local ip=$(echo "$line" | grep -oE "Host: [0-9.]+" | cut -d' ' -f2)
+            local port=$(echo "$line" | grep -oE "[0-9]+/open" | cut -d'/' -f1)
+            
+            # Identify database type by port
+            local db_type=""
+            case $port in
+                1433) db_type="MSSQL" ;;
+                3306) db_type="MySQL" ;;
+                5432) db_type="PostgreSQL" ;;
+                1521) db_type="Oracle" ;;
+                27017) db_type="MongoDB" ;;
+                6379) db_type="Redis" ;;
+                11211) db_type="Memcached" ;;
+                9200|9300) db_type="Elasticsearch" ;;
+                *) db_type="Unknown DB" ;;
+            esac
+            
+            echo -e "${RED}🗄️  $ip:$port ${NC}${YELLOW}($db_type)${NC}"
+        fi
+    done < "$temp_results"
+    
+    echo "----------------------------------------"
+    echo -e "${BLUE}📊 Database Summary: $db_count services${NC}"
+    rm -f "$temp_results"
+}
+
+# IoT and embedded device discovery
+iot_device_discovery() {
+    local network_base="$1"
+    local scan_type="$2"
+    
+    echo -e "${PURPLE}📱 IoT & Embedded Device Discovery${NC}"
+    
+    # Common IoT ports and services
+    local iot_ports="21,22,23,80,443,554,1900,5000,8080,8081,8443,9000,49152"
+    local temp_results=$(mktemp)
+    
+    echo -e "${CYAN}Scanning for cameras, routers, smart devices, UPnP services${NC}"
+    
+    nmap -n -Pn -sS -sV -p "$iot_ports" --open \
+         --script="http-title,upnp-info,rtsp-url-brute,ftp-anon" \
+         -T4 "${network_base}.0/24" > "$temp_results" 2>/dev/null
+    
+    # Parse for IoT indicators
+    local iot_keywords=("camera" "webcam" "dvr" "nvr" "router" "switch" "ap" "access point" "smart" "iot" "embedded")
+    local iot_count=0
+    
+    echo -e "${GREEN}📋 Potential IoT Devices:${NC}"
+    echo "----------------------------------------"
+    
+    # Look for IoT signatures in service banners and HTTP titles
+    while IFS= read -r line; do
+        local found_iot=false
+        for keyword in "${iot_keywords[@]}"; do
+            if [[ "$line" == *"$keyword"* ]] || [[ "$line" == *"${keyword^}"* ]]; then
+                found_iot=true
+                break
+            fi
+        done
+        
+        if $found_iot; then
+            ((iot_count++))
+            local ip=$(echo "$line" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+            echo -e "${PURPLE}📱 $ip ${NC}${CYAN}(Potential IoT device)${NC}"
+            echo -e "${YELLOW}  └─ Signature: $(echo "$line" | head -c 80)...${NC}"
+        fi
+    done < "$temp_results"
+    
+    # Additional UPnP discovery
+    echo ""
+    echo -e "${CYAN}🔍 UPnP Device Discovery...${NC}"
+    nmap -n -Pn -sU -p 1900 --script=upnp-info "${network_base}.0/24" 2>/dev/null | \
+    grep -E "(Nmap scan report|Server:|ST:)" | \
+    while read -r line; do
+        if [[ "$line" == *"Nmap scan report"* ]]; then
+            local upnp_ip=$(echo "$line" | grep -oE "[0-9.]+" | tail -1)
+            echo -e "${GREEN}📡 $upnp_ip ${NC}${CYAN}(UPnP enabled)${NC}"
+        fi
+    done
+    
+    echo "----------------------------------------"
+    echo -e "${BLUE}📊 IoT Discovery Summary: $iot_count potential devices${NC}"
+    rm -f "$temp_results"
+}
+
 # Main enhanced scan function
 enhanced_network_scan() {
     local network_base="$1"
@@ -424,8 +788,8 @@ enhanced_network_scan() {
 # Module menu
 show_v6_menu() {
     echo -e "${PURPLE}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║         v6module - Advanced Features       ║${NC}"
-    echo -e "${PURPLE}║               Version $MODULE_VERSION               ║${NC}"
+    echo -e "${PURPLE}║             v6module - Advanced Features       ║${NC}"
+    echo -e "${PURPLE}║               Version $MODULE_VERSION              ║${NC}"
     echo -e "${PURPLE}╚════════════════════════════════════════════╝${NC}"
     echo ""
     echo "Enhanced Discovery Options:"
@@ -452,3 +816,9 @@ export -f vulnerability_scan
 export -f arp_network_scan
 export -f generate_enhanced_report
 export -f network_topology_map
+export -f http_service_enum
+export -f full_port_sweep
+export -f web_app_fingerprinting
+export -f smb_enumeration
+export -f database_enum
+export -f iot_device_discovery
