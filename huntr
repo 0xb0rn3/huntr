@@ -1,6 +1,3 @@
-Of course\! Here is the complete script with your requested additions integrated.
-
-```bash
 #!/usr/bin/env bash
 
 # Tool Information
@@ -989,4 +986,3 @@ main() {
 
 # Execute main function with all arguments
 main "$@"
-```
